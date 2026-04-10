@@ -35,12 +35,73 @@ export function activate(context: vscode.ExtensionContext) {
     const deps = Object.keys(pkgObject.dependencies ?? {}).length;
     const devDeps = Object.keys(pkgObject.devDependencies ?? {}).length;
 
-    vscode.window.showInformationMessage(
-      `📦 ${deps} prod deps | 🛠️ ${devDeps} dev deps | Total: ${deps + devDeps}`,
+    const panel = vscode.window.createWebviewPanel(
+      "depRadar",
+      "Dep Radar",
+      vscode.ViewColumn.One,
+      {
+        enableScripts: true,
+      },
     );
+
+    panel.webview.html = getWebViewContent(deps, devDeps);
   });
 
   context.subscriptions.push(disposable);
+}
+function getWebViewContent(deps: number, devDeps: number): string {
+  const total = devDeps + deps;
+  return `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dep Radar</title>
+        <style>
+            body {
+                font-family: var(--vscode-font-family);
+                color: var(--vscode-foreground);
+                background: var(--vscode-editor-background);
+                padding: 20px;
+            }
+            .card {
+                background: var(--vscode-editor-inactiveSelectionBackground);
+                border-radius: 8px;
+                padding: 16px;
+                margin-bottom: 12px;
+            }
+            .stat {
+                display: flex;
+                justify-content: space-between;
+                padding: 8px 0;
+                border-bottom: 1px solid var(--vscode-panel-border);
+            }
+            .stat:last-child { border-bottom: none; }
+            .stat-value {
+                font-weight: bold;
+                font-size: 1.2em;
+            }
+            h2 { margin-top: 0; }
+        </style>
+    </head>
+    <body>
+        <h2>📦 Dependency Overview</h2>
+        <div class="card">
+            <div class="stat">
+                <span>Total Dependencies</span>
+                <span class="stat-value">${total}</span>
+            </div>
+            <div class="stat">
+                <span>Production</span>
+                <span class="stat-value">${deps}</span>
+            </div>
+            <div class="stat">
+                <span>Dev Dependencies</span>
+                <span class="stat-value">${devDeps}</span>
+            </div>
+        </div>
+    </body>
+    </html>`;
 }
 
 // This method is called when your extension is deactivated
