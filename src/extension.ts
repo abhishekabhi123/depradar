@@ -38,16 +38,36 @@ export function activate(context: vscode.ExtensionContext) {
     const panel = vscode.window.createWebviewPanel(
       "depRadar",
       "Dep Radar",
-      vscode.ViewColumn.One,
+      vscode.ViewColumn.Beside,
       {
         enableScripts: true,
       },
     );
 
     panel.webview.html = getWebViewContent(deps, devDeps);
-  });
+    panel.webview.onDidReceiveMessage(
+      (message) => {
+        if (message.command === "refresh") {
+          const rawPkg = fs.readFileSync(pkgPath, "utf-8");
+          const pkgObject = JSON.parse(rawPkg);
 
-  context.subscriptions.push(disposable);
+          const freshDeps = Object.keys(pkgObject.dependencies ?? {}).length;
+          const freshDevDeps = Object.keys(
+            pkgObject.devDependencies ?? {},
+          ).length;
+
+          panel.webview.postMessage({
+            command: "refresh",
+            deps: freshDeps,
+            devDeps: freshDevDeps,
+            total: freshDeps + freshDevDeps,
+          });
+        }
+      },
+      undefined,
+      context.subscriptions,
+    );
+  });
 }
 function getWebViewContent(deps: number, devDeps: number): string {
   const total = devDeps + deps;
@@ -82,24 +102,55 @@ function getWebViewContent(deps: number, devDeps: number): string {
                 font-size: 1.2em;
             }
             h2 { margin-top: 0; }
+            button {
+                background: var(--vscode-button-background);
+                color: var(--vscode-button-foreground);
+                border: none;
+                padding: 8px 16px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 13px;
+            }
+            button:hover {
+                background: var(--vscode-button-hoverBackground);
+            }
         </style>
     </head>
     <body>
         <h2>📦 Dependency Overview</h2>
+
         <div class="card">
             <div class="stat">
                 <span>Total Dependencies</span>
-                <span class="stat-value">${total}</span>
+                <span class="stat-value" id="total">${total}</span>
             </div>
             <div class="stat">
                 <span>Production</span>
-                <span class="stat-value">${deps}</span>
+                <span class="stat-value" id="deps">${deps}</span>
             </div>
             <div class="stat">
                 <span>Dev Dependencies</span>
-                <span class="stat-value">${devDeps}</span>
+                <span class="stat-value" id="devDeps">${devDeps}</span>
             </div>
         </div>
+
+        <button id="refreshBtn">🔄 Refresh</button>
+
+        <script>
+            const vsCode = acquireVsCodeApi();
+            document.getElementById('refreshBtn').addEventListener('click' , ()=>{
+           vsCode.postMessage({command : 'refresh'})
+            });
+
+            window.addEventListener('message' , (event)=>{
+            const message = event.data;
+            if(message.command === 'refresh'){
+            document.getElementById('total').textContent = message.total;
+            document.getElementById('deps').textContent = message.deps;
+            document.getElementById('devDeps').textContent = message.devDeps;
+            }
+            })
+        </script>
     </body>
     </html>`;
 }
