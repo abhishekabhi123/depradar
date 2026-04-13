@@ -3,6 +3,7 @@
 import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
+import { getUsedPackages } from "./scanner";
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -35,6 +36,17 @@ export function activate(context: vscode.ExtensionContext) {
     const deps = Object.keys(pkgObject.dependencies ?? {}).length;
     const devDeps = Object.keys(pkgObject.devDependencies ?? {}).length;
 
+    const installedPackages = new Set([
+      ...Object.keys(pkgObject.dependencies ?? {}),
+      ...Object.keys(pkgObject.devDependencies ?? {}),
+    ]);
+
+    const usedPackages = getUsedPackages(rootPath);
+
+    const unusedPackages = [...installedPackages].filter(
+      (pkg) => !usedPackages.has(pkg),
+    );
+
     const panel = vscode.window.createWebviewPanel(
       "depRadar",
       "Dep Radar",
@@ -44,7 +56,7 @@ export function activate(context: vscode.ExtensionContext) {
       },
     );
 
-    panel.webview.html = getWebViewContent(deps, devDeps);
+    panel.webview.html = getWebViewContent(deps, devDeps, unusedPackages);
     panel.webview.onDidReceiveMessage(
       (message) => {
         if (message.command === "refresh") {
@@ -56,11 +68,22 @@ export function activate(context: vscode.ExtensionContext) {
             pkgObject.devDependencies ?? {},
           ).length;
 
+          const freshInstalledPackages = new Set([
+            ...Object.keys(pkgObject.dependencies ?? {}),
+            ...Object.keys(pkgObject.devDependencies ?? {}),
+          ]);
+
+          const freshUsedPackages = getUsedPackages(rootPath);
+          const freshUnusedPackages = [...freshInstalledPackages].filter(
+            (pkg) => !freshUsedPackages.has(pkg),
+          );
+
           panel.webview.postMessage({
             command: "refresh",
             deps: freshDeps,
             devDeps: freshDevDeps,
             total: freshDeps + freshDevDeps,
+            unused: freshUnusedPackages,
           });
         }
       },
@@ -69,7 +92,11 @@ export function activate(context: vscode.ExtensionContext) {
     );
   });
 }
-function getWebViewContent(deps: number, devDeps: number): string {
+function getWebViewContent(
+  deps: number,
+  devDeps: number,
+  unused: string[],
+): string {
   const total = devDeps + deps;
   return `<!DOCTYPE html>
     <html lang="en">
@@ -134,22 +161,51 @@ function getWebViewContent(deps: number, devDeps: number): string {
             </div>
         </div>
 
+        <h2>🧹 Unused Dependencies</h2>
+<div class="card" id="unusedList">
+    ${
+      unused.length === 0
+        ? "<p>✅ No unused dependencies found!</p>"
+        : unused
+            .map(
+              (pkg) => `
+            <div class="stat">
+                <span>${pkg}</span>
+                <span style="color: var(--vscode-errorForeground)">unused</span>
+            </div>
+        `,
+            )
+            .join("")
+    }
+</div>
+
         <button id="refreshBtn">🔄 Refresh</button>
 
         <script>
             const vsCode = acquireVsCodeApi();
-            document.getElementById('refreshBtn').addEventListener('click' , ()=>{
-           vsCode.postMessage({command : 'refresh'})
+            document.getElementById('refreshBtn').addEventListener('click', () => {
+                vsCode.postMessage({command: 'refresh'});
             });
 
-            window.addEventListener('message' , (event)=>{
-            const message = event.data;
-            if(message.command === 'refresh'){
-            document.getElementById('total').textContent = message.total;
-            document.getElementById('deps').textContent = message.deps;
-            document.getElementById('devDeps').textContent = message.devDeps;
-            }
-            })
+            window.addEventListener('message', (event) => {
+                const message = event.data;
+                if (message.command === 'refresh') {
+                    document.getElementById('total').textContent = message.total;
+                    document.getElementById('deps').textContent = message.deps;
+                    document.getElementById('devDeps').textContent = message.devDeps;
+                    const unusedList = document.getElementById('unusedList');
+                    if (message.unused.length === 0) {
+                        unusedList.innerHTML = "<p>✅ No unused dependencies found!</p>";
+                    } else {
+                        unusedList.innerHTML = message.unused.map(pkg => \`
+                            <div class="stat">
+                                <span>\${pkg}</span>
+                                <span style="color: var(--vscode-errorForeground)">unused</span>
+                            </div>
+                        \`).join('');
+                    }
+                }
+            });
         </script>
     </body>
     </html>`;
