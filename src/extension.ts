@@ -4,6 +4,26 @@ import * as vscode from "vscode";
 import * as fs from "fs";
 import * as path from "path";
 import { getUsedPackages } from "./scanner";
+import {
+  AuditSummary,
+  getOutdatedPackages,
+  getVulnerabilities,
+  installDependencies,
+  OutdatedPackage,
+} from "./auditor";
+const SCRIPT_ONLY_PACKAGES = new Set([
+  "nodemon",
+  "ts-node",
+  "concurrently",
+  "cross-env",
+  "rimraf",
+  "prettier",
+  "eslint",
+  "jest",
+  "vitest",
+  "tsx",
+  "tsc-alias",
+]);
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -14,89 +34,203 @@ export function activate(context: vscode.ExtensionContext) {
   // The command has been defined in the package.json file
   // Now provide the implementation of the command with registerCommand
   // The commandId parameter must match the command field in package.json
-  const disposable = vscode.commands.registerCommand("depradar.analyze", () => {
-    // The code you place here will be executed every time your command is executed
-    const workSpaceFolder = vscode.workspace.workspaceFolders;
-    if (!workSpaceFolder) {
-      vscode.window.showErrorMessage("No workspace opened!");
-      return;
-    }
-    const rootPath = workSpaceFolder[0].uri.fsPath;
+  const disposable = vscode.commands.registerCommand(
+    "depradar.analyze",
+    async () => {
+      // The code you place here will be executed every time your command is executed
+      const workSpaceFolder = vscode.workspace.workspaceFolders;
+      if (!workSpaceFolder) {
+        vscode.window.showErrorMessage("No workspace opened!");
+        return;
+      }
+      const rootPath = workSpaceFolder[0].uri.fsPath;
 
-    const pkgPath = path.join(rootPath, "package.json");
+      const pkgPath = path.join(rootPath, "package.json");
 
-    if (!fs.existsSync(pkgPath)) {
-      vscode.window.showErrorMessage("package.json file does not exist!");
-      return;
-    }
+      if (!fs.existsSync(pkgPath)) {
+        vscode.window.showErrorMessage("package.json file does not exist!");
+        return;
+      }
 
-    const rawPkg = fs.readFileSync(pkgPath, "utf-8");
-    const pkgObject = JSON.parse(rawPkg);
+      const rawPkg = fs.readFileSync(pkgPath, "utf-8");
+      const pkgObject = JSON.parse(rawPkg);
 
-    const deps = Object.keys(pkgObject.dependencies ?? {}).length;
-    const devDeps = Object.keys(pkgObject.devDependencies ?? {}).length;
+      const deps = Object.keys(pkgObject.dependencies ?? {}).length;
+      const devDeps = Object.keys(pkgObject.devDependencies ?? {}).length;
 
-    const installedPackages = new Set([
-      ...Object.keys(pkgObject.dependencies ?? {}),
-      ...Object.keys(pkgObject.devDependencies ?? {}),
-    ]);
+      const installedPackages = new Set([
+        ...Object.keys(pkgObject.dependencies ?? {}),
+        ...Object.keys(pkgObject.devDependencies ?? {}),
+      ]);
 
-    const usedPackages = getUsedPackages(rootPath);
+      const usedPackages = getUsedPackages(rootPath);
 
-    const unusedPackages = [...installedPackages].filter(
-      (pkg) => !usedPackages.has(pkg),
-    );
+      const unusedPackages = [...installedPackages].filter(
+        (pkg) => !usedPackages.has(pkg) && !SCRIPT_ONLY_PACKAGES.has(pkg),
+      );
 
-    const panel = vscode.window.createWebviewPanel(
-      "depRadar",
-      "Dep Radar",
-      vscode.ViewColumn.Beside,
-      {
-        enableScripts: true,
-      },
-    );
+      const panel = vscode.window.createWebviewPanel(
+        "depRadar",
+        "Dep Radar",
+        vscode.ViewColumn.Beside,
+        {
+          enableScripts: true,
+        },
+      );
 
-    panel.webview.html = getWebViewContent(deps, devDeps, unusedPackages);
-    panel.webview.onDidReceiveMessage(
-      (message) => {
-        if (message.command === "refresh") {
-          const rawPkg = fs.readFileSync(pkgPath, "utf-8");
-          const pkgObject = JSON.parse(rawPkg);
+      const [outdated, auditSummary] = await Promise.all([
+        getOutdatedPackages(rootPath),
+        getVulnerabilities(rootPath),
+      ]);
 
-          const freshDeps = Object.keys(pkgObject.dependencies ?? {}).length;
-          const freshDevDeps = Object.keys(
-            pkgObject.devDependencies ?? {},
-          ).length;
+      panel.webview.html = getWebViewContent(
+        deps,
+        devDeps,
+        unusedPackages,
+        outdated,
+        auditSummary,
+      );
 
-          const freshInstalledPackages = new Set([
-            ...Object.keys(pkgObject.dependencies ?? {}),
-            ...Object.keys(pkgObject.devDependencies ?? {}),
-          ]);
+      panel.webview.onDidReceiveMessage(
+        async (message) => {
+          if (message.command === "refresh") {
+            console.log("Refresh triggered");
 
-          const freshUsedPackages = getUsedPackages(rootPath);
-          const freshUnusedPackages = [...freshInstalledPackages].filter(
-            (pkg) => !freshUsedPackages.has(pkg),
-          );
+            // Run npm install to sync node_modules with package.json changes
+            await installDependencies(rootPath);
 
-          panel.webview.postMessage({
-            command: "refresh",
-            deps: freshDeps,
-            devDeps: freshDevDeps,
-            total: freshDeps + freshDevDeps,
-            unused: freshUnusedPackages,
-          });
-        }
-      },
-      undefined,
-      context.subscriptions,
-    );
-  });
+            const rawPkg = fs.readFileSync(pkgPath, "utf-8");
+            const pkgObject = JSON.parse(rawPkg);
+
+            const depKeys = Object.keys(pkgObject.dependencies ?? {});
+            const devDepKeys = Object.keys(pkgObject.devDependencies ?? {});
+            const freshDeps = depKeys.length;
+            const freshDevDeps = devDepKeys.length;
+
+            const freshInstalledPackages = new Set([...depKeys, ...devDepKeys]);
+            const freshUsedPackages = getUsedPackages(rootPath);
+            const freshUnusedPackages = [...freshInstalledPackages].filter(
+              (pkg) =>
+                !freshUsedPackages.has(pkg) && !SCRIPT_ONLY_PACKAGES.has(pkg),
+            );
+
+            console.log("Fetching fresh outdated and audit data...");
+            const [outdated, auditSummary] = await Promise.all([
+              getOutdatedPackages(rootPath),
+              getVulnerabilities(rootPath),
+            ]);
+
+            console.log(
+              "Refresh data - Outdated:",
+              outdated.length,
+              "Unused:",
+              freshUnusedPackages.length,
+            );
+
+            // Update the entire HTML with fresh data
+            panel.webview.html = getWebViewContent(
+              freshDeps,
+              freshDevDeps,
+              freshUnusedPackages,
+              outdated,
+              auditSummary,
+            );
+
+            // Send completion signal to hide loading state
+            panel.webview.postMessage({
+              command: "refreshComplete",
+            });
+          }
+        },
+        undefined,
+        context.subscriptions,
+      );
+    },
+  );
+
+  context.subscriptions.push(disposable);
 }
+
 function getWebViewContent(
   deps: number,
   devDeps: number,
   unused: string[],
+  outdated: OutdatedPackage[],
+  auditSummary: AuditSummary,
 ): string {
+  const outdatedHTML = `
+<h2>🔄 Outdated Packages (${outdated.length})</h2>
+<div class="card">
+    ${
+      outdated.length === 0
+        ? "<p>✅ All packages are up to date!</p>"
+        : outdated
+            .map(
+              (pkg) => `
+            <div class="stat">
+                <div>
+                    <span>${pkg.name}</span>
+                    <span class="tag-indirect">${pkg.current} → ${pkg.latest}</span>
+                </div>
+                <span class="badge badge-${pkg.updateType}">
+                    ${pkg.updateType}
+                </span>
+            </div>
+        `,
+            )
+            .join("")
+    }
+</div>`;
+
+  const vulnHTML = `
+<h2>⚠️ Vulnerabilities (${auditSummary.totals.total})</h2>
+
+<!-- Summary bar -->
+<div class="card">
+    <div class="stat">
+        <span>Critical</span>
+        <span class="badge badge-critical">${auditSummary.totals.critical}</span>
+    </div>
+    <div class="stat">
+        <span>High</span>
+        <span class="badge badge-high">${auditSummary.totals.high}</span>
+    </div>
+    <div class="stat">
+        <span>Moderate</span>
+        <span class="badge badge-moderate">${auditSummary.totals.moderate}</span>
+    </div>
+    <div class="stat">
+        <span>Low</span>
+        <span class="badge badge-low">${auditSummary.totals.low}</span>
+    </div>
+</div>
+
+<!-- Package-level detail — only direct deps -->
+<div class="card">
+    <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 8px;">
+        Showing direct dependencies only. Indirect deps are harder to fix and usually resolved by updating their parent.
+    </p>
+    ${
+      auditSummary.vulnerabilities
+        .filter((v) => v.isDirect)
+        .map(
+          (v) => `
+            <div class="stat">
+                <div>
+                    <span>${v.name}</span>
+                    ${
+                      v.fixAvailable
+                        ? '<span class="tag-indirect">fix available</span>'
+                        : '<span class="tag-indirect">no fix yet</span>'
+                    }
+                </div>
+                <span class="badge badge-${v.severity}">${v.severity}</span>
+            </div>
+        `,
+        )
+        .join("") || "<p>✅ No direct dependency vulnerabilities!</p>"
+    }
+</div>`;
   const total = devDeps + deps;
   return `<!DOCTYPE html>
     <html lang="en">
@@ -141,6 +275,41 @@ function getWebViewContent(
             button:hover {
                 background: var(--vscode-button-hoverBackground);
             }
+                .badge {
+          padding: 2px 8px;
+          border-radius: 4px;
+          font-size: 11px;
+          font-weight: bold;
+          text-transform: uppercase;
+}
+    .badge-critical { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); }
+    .badge-high     { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); opacity: 0.85; }
+    .badge-moderate { background: var(--vscode-warningForeground); color: var(--vscode-editor-background); }
+    .badge-low      { background: var(--vscode-descriptionForeground); color: var(--vscode-editor-background); }
+    .badge-major    { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); }
+    .badge-minor    { background: var(--vscode-warningForeground); color: var(--vscode-editor-background); }
+    .badge-patch    { color: var(--vscode-foreground); border: 1px solid var(--vscode-panel-border); }
+    .tag-indirect   { font-size: 11px; color: var(--vscode-descriptionForeground); margin-left: 6px; }
+    .badge-prerelease { background: var(--vscode-warningForeground); color: var(--vscode-editor-background); }
+    .loading {
+        text-align: center;
+        padding: 20px;
+        color: var(--vscode-descriptionForeground);
+    }
+    .loading::after {
+        content: '';
+        animation: dots 1.5s steps(4, end) infinite;
+    }
+    @keyframes dots {
+        0%, 20% { content: ''; }
+        40% { content: '.'; }
+        60% { content: '..'; }
+        80%, 100% { content: '...'; }
+    }
+    button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
         </style>
     </head>
     <body>
@@ -179,31 +348,30 @@ function getWebViewContent(
     }
 </div>
 
+    ${outdatedHTML}
+    ${vulnHTML}
+
+        <div id="loadingSpace"></div>
         <button id="refreshBtn">🔄 Refresh</button>
 
         <script>
             const vsCode = acquireVsCodeApi();
-            document.getElementById('refreshBtn').addEventListener('click', () => {
+            const refreshBtn = document.getElementById('refreshBtn');
+            const loadingSpace = document.getElementById('loadingSpace');
+            
+            refreshBtn.addEventListener('click', () => {
+                // Show loading and disable button
+                refreshBtn.disabled = true;
+                loadingSpace.innerHTML = '<div class="loading">Analyzing</div>';
                 vsCode.postMessage({command: 'refresh'});
             });
 
             window.addEventListener('message', (event) => {
                 const message = event.data;
-                if (message.command === 'refresh') {
-                    document.getElementById('total').textContent = message.total;
-                    document.getElementById('deps').textContent = message.deps;
-                    document.getElementById('devDeps').textContent = message.devDeps;
-                    const unusedList = document.getElementById('unusedList');
-                    if (message.unused.length === 0) {
-                        unusedList.innerHTML = "<p>✅ No unused dependencies found!</p>";
-                    } else {
-                        unusedList.innerHTML = message.unused.map(pkg => \`
-                            <div class="stat">
-                                <span>\${pkg}</span>
-                                <span style="color: var(--vscode-errorForeground)">unused</span>
-                            </div>
-                        \`).join('');
-                    }
+                if (message.command === 'refreshComplete') {
+                    // Hide loading and enable button
+                    loadingSpace.innerHTML = '';
+                    refreshBtn.disabled = false;
                 }
             });
         </script>
