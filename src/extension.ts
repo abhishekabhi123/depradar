@@ -24,7 +24,8 @@ const SCRIPT_ONLY_PACKAGES = new Set([
   "tsx",
   "tsc-alias",
 ]);
-
+import { buildGraph } from "./graphBuilder";
+import { GraphData } from "./graphBuilder";
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
@@ -83,12 +84,17 @@ export function activate(context: vscode.ExtensionContext) {
         getVulnerabilities(rootPath),
       ]);
 
+      const graphData = await buildGraph(rootPath, installedPackages);
+      console.log("nodes count:", graphData.nodes.length);
+      console.log("links count:", graphData.links.length);
+      console.log("sample nodes:", graphData.nodes.slice(0, 5));
       panel.webview.html = getWebViewContent(
         deps,
         devDeps,
         unusedPackages,
         outdated,
         auditSummary,
+        graphData,
       );
 
       panel.webview.onDidReceiveMessage(
@@ -134,6 +140,7 @@ export function activate(context: vscode.ExtensionContext) {
               freshUnusedPackages,
               outdated,
               auditSummary,
+              graphData,
             );
 
             // Send completion signal to hide loading state
@@ -157,6 +164,7 @@ function getWebViewContent(
   unused: string[],
   outdated: OutdatedPackage[],
   auditSummary: AuditSummary,
+  graphData: GraphData,
 ): string {
   const outdatedHTML = `
 <h2>🔄 Outdated Packages (${outdated.length})</h2>
@@ -238,6 +246,7 @@ function getWebViewContent(
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Dep Radar</title>
+        <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
         <style>
             body {
                 font-family: var(--vscode-font-family);
@@ -310,49 +319,122 @@ function getWebViewContent(
         opacity: 0.5;
         cursor: not-allowed;
     }
+    body {
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+    }
+    .tabs {
+        padding: 20px 20px 0 20px;
+        flex-shrink: 0;
+    }
+    #dashboard-view {
+        flex: 1;
+        overflow-y: auto;
+        padding: 0 20px 20px 20px;
+    }
+    #graph-view {
+        flex: 1;
+        overflow: hidden;
+        padding: 0 20px 20px 20px;
+        display: flex;
+        flex-direction: column;
+    }
+    #graph-view h2 {
+        margin: 0 0 12px 0;
+        flex-shrink: 0;
+    }
+    #graph-container {
+        width: 100%;
+        height: 100%;
+        border: 1px solid var(--vscode-panel-border);
+        border-radius: 8px;
+        flex: 1;
+    }
+    #graph-container svg {
+        cursor: grab;
+    }
+    #graph-container svg.grabbing {
+        cursor: grabbing;
+    }
+        .tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.tab {
+    padding: 6px 16px;
+    border-radius: 4px;
+    border: 1px solid var(--vscode-panel-border);
+    background: transparent;
+    color: var(--vscode-foreground);
+    cursor: pointer;
+}
+.tab.active {
+    background: var(--vscode-button-background);
+    color: var(--vscode-button-foreground);
+    border-color: transparent;
+}
         </style>
     </head>
     <body>
-        <h2>📦 Dependency Overview</h2>
-
-        <div class="card">
-            <div class="stat">
-                <span>Total Dependencies</span>
-                <span class="stat-value" id="total">${total}</span>
-            </div>
-            <div class="stat">
-                <span>Production</span>
-                <span class="stat-value" id="deps">${deps}</span>
-            </div>
-            <div class="stat">
-                <span>Dev Dependencies</span>
-                <span class="stat-value" id="devDeps">${devDeps}</span>
-            </div>
-        </div>
-
-        <h2>🧹 Unused Dependencies</h2>
-<div class="card" id="unusedList">
-    ${
-      unused.length === 0
-        ? "<p>✅ No unused dependencies found!</p>"
-        : unused
-            .map(
-              (pkg) => `
-            <div class="stat">
-                <span>${pkg}</span>
-                <span style="color: var(--vscode-errorForeground)">unused</span>
-            </div>
-        `,
-            )
-            .join("")
-    }
+        <!-- Tab buttons -->
+<div class="tabs">
+    <button class="tab active" id="tab-dashboard" onclick="showTab('dashboard')">📊 Dashboard</button>
+    <button class="tab" id="tab-graph" onclick="showTab('graph')">🌐 Graph</button>
 </div>
+
+<!-- Dashboard view with all content -->
+<div id="dashboard-view">
+    <h2>📦 Dependency Overview</h2>
+
+    <div class="card">
+        <div class="stat">
+            <span>Total Dependencies</span>
+            <span class="stat-value" id="total">${total}</span>
+        </div>
+        <div class="stat">
+            <span>Production</span>
+            <span class="stat-value" id="deps">${deps}</span>
+        </div>
+        <div class="stat">
+            <span>Dev Dependencies</span>
+            <span class="stat-value" id="devDeps">${devDeps}</span>
+        </div>
+    </div>
+
+    <h2>🧹 Unused Dependencies</h2>
+    <div class="card" id="unusedList">
+        ${
+          unused.length === 0
+            ? "<p>✅ No unused dependencies found!</p>"
+            : unused
+                .map(
+                  (pkg) => `
+                <div class="stat">
+                    <span>${pkg}</span>
+                    <span style="color: var(--vscode-errorForeground)">unused</span>
+                </div>
+            `,
+                )
+                .join("")
+        }
+    </div>
 
     ${outdatedHTML}
     ${vulnHTML}
 
-        <div id="loadingSpace"></div>
-        <button id="refreshBtn">🔄 Refresh</button>
+    <div id="loadingSpace"></div>
+    <button id="refreshBtn">🔄 Refresh</button>
+</div>
+
+<!-- New graph view -->
+<div id="graph-view" style="display:none;">
+    <h2>🌐 Dependency Graph</h2>
+    <div id="graph-container"></div>
+</div>
 
         <script>
             const vsCode = acquireVsCodeApi();
@@ -374,6 +456,140 @@ function getWebViewContent(
                     refreshBtn.disabled = false;
                 }
             });
+           function showTab(name) {
+    // Show/hide views using flex layout
+    document.getElementById('dashboard-view').style.display = 
+        name === 'dashboard' ? 'block' : 'none';
+    document.getElementById('graph-view').style.display = 
+        name === 'graph' ? 'flex' : 'none';
+
+    // Update active tab styles
+    document.querySelectorAll('.tab').forEach(t => {
+        t.classList.remove('active');
+    });
+    document.getElementById('tab-' + name).classList.add('active');
+}
+
+// Graph data injected from extension
+const graphData = ${JSON.stringify(graphData)};
+
+function renderGraph() {
+    const container = document.getElementById('graph-container');
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    // Clear any existing SVG
+    d3.select('#graph-container').selectAll('svg').remove();
+
+    // Create SVG canvas
+    const svg = d3.select('#graph-container')
+        .append('svg')
+        .attr('width', width)
+        .attr('height', height);
+
+    // Add zoom/pan behaviour
+    const g = svg.append('g');
+    const zoom = d3.zoom()
+        .scaleExtent([0.5, 5])
+        .on('zoom', (event) => {
+            g.attr('transform', event.transform);
+        });
+    svg.call(zoom);
+
+    // D3 force simulation — physics engine
+    const simulation = d3.forceSimulation(graphData.nodes)
+        .force('link', d3.forceLink(graphData.links)
+            .id(d => d.id)
+            .distance(80))
+        .force('charge', d3.forceManyBody().strength(-200))
+        .force('center', d3.forceCenter(width / 2, height / 2));
+
+    // Draw links (lines)
+    const link = g.append('g')
+        .selectAll('line')
+        .data(graphData.links)
+        .join('line')
+        .attr('stroke', 'var(--vscode-panel-border)')
+        .attr('stroke-width', 1.5);
+
+    // Draw nodes (circles)
+    const node = g.append('g')
+        .selectAll('circle')
+        .data(graphData.nodes)
+        .join('circle')
+        .attr('r', d => d.isDirect ? 10 : 6)
+        .attr('fill', d => d.isDirect
+            ? 'var(--vscode-button-background)'   // your direct deps — highlighted
+            : 'var(--vscode-descriptionForeground)') // transitive — subtle
+        .call(d3.drag()
+            .on('start', (event, d) => {
+                if (!event.active) simulation.alphaTarget(0.3).restart();
+                d.fx = d.x; d.fy = d.y;
+            })
+            .on('drag', (event, d) => {
+                d.fx = event.x; d.fy = event.y;
+            })
+            .on('end', (event, d) => {
+                if (!event.active) simulation.alphaTarget(0);
+                d.fx = null; d.fy = null;
+            })
+        );
+
+    // Draw labels
+    const label = g.append('g')
+        .selectAll('text')
+        .data(graphData.nodes)
+        .join('text')
+        .text(d => d.id)
+        .attr('font-size', d => d.isDirect ? '11px' : '9px')
+        .attr('fill', 'var(--vscode-foreground)')
+        .attr('dx', 12)
+        .attr('dy', 4)
+        .attr('pointer-events', 'none');
+
+    // Update positions each simulation tick
+    simulation.on('tick', () => {
+        link
+            .attr('x1', d => d.source.x)
+            .attr('y1', d => d.source.y)
+            .attr('x2', d => d.target.x)
+            .attr('y2', d => d.target.y);
+
+        node
+            .attr('cx', d => d.x)
+            .attr('cy', d => d.y);
+
+        label
+            .attr('x', d => d.x)
+            .attr('y', d => d.y);
+    });
+
+    // Reset zoom to fit
+    const bounds = g.node().getBBox();
+    const fullWidth = bounds.width;
+    const fullHeight = bounds.height;
+    const midX = bounds.x + fullWidth / 2;
+    const midY = bounds.y + fullHeight / 2;
+
+    if (fullWidth > 0 && fullHeight > 0) {
+        const scale = Math.min(width / fullWidth, height / fullHeight) * 0.75;
+        const translate = [width / 2 - scale * midX, height / 2 - scale * midY];
+        svg.transition().duration(750).call(
+            zoom.transform,
+            d3.zoomIdentity.translate(translate[0], translate[1]).scale(scale)
+        );
+    }
+}
+
+// Render when graph tab is opened
+document.getElementById('tab-graph').addEventListener('click', () => {
+    // Only render once
+    setTimeout(() => {
+        if (!document.querySelector('#graph-container svg')) {
+            renderGraph();
+        }
+    }, 0);
+});
         </script>
     </body>
     </html>`;
