@@ -72,18 +72,10 @@ export async function buildGraph(
   }
   let raw: any;
   try {
-    raw = await JSON.parse(stdOut);
+    raw = JSON.parse(stdOut);
   } catch (error) {
-    console.log("JSON parse failed:", error);
     return { nodes: [], links: [] };
   }
-  console.log("raw.name:", raw.name);
-  console.log("raw.dependencies exists:", !!raw.dependencies);
-  console.log(
-    "raw.dependencies keys:",
-    Object.keys(raw.dependencies ?? {}).slice(0, 5),
-  );
-  console.log("stdout first 300 chars:", stdOut.substring(0, 300));
 
   const nodes: GraphNode[] = [];
   const links: GraphLink[] = [];

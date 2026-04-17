@@ -13,6 +13,7 @@ export interface Vulnerability {
   severity: "low" | "moderate" | "high" | "critical";
   isDirect: boolean;
   fixAvailable: boolean;
+  effects: string[];
 }
 
 export interface AuditSummary {
@@ -44,17 +45,10 @@ function runCommand(command: string, cwd: string): Promise<string> {
   });
 }
 
-export async function installDependencies(
-  rootPath: string,
-): Promise<void> {
+export async function installDependencies(rootPath: string): Promise<void> {
   try {
-    console.log("Installing dependencies...");
-    // Don't fail on npm install errors - just try to sync what we can
-    // This allows outdated/audit to work even if some packages don't exist
-    const result = await runCommand("npm install --legacy-peer-deps 2>&1 || true", rootPath);
-    console.log("npm install completed (errors ignored)");
+    await runCommand("npm install --legacy-peer-deps 2>&1 || true", rootPath);
   } catch (error) {
-    console.error("Error during npm install:", error);
     // Continue anyway - outdated/audit might still work with partial installs
   }
 }
@@ -112,6 +106,7 @@ export async function getVulnerabilities(
         severity: info.severity,
         isDirect: info.isDirect,
         fixAvailable: !!info.fixAvailable,
+        effects: info.effects,
       });
     }
     return {

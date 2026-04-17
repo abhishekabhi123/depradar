@@ -10,6 +10,7 @@ import {
   getVulnerabilities,
   installDependencies,
   OutdatedPackage,
+  Vulnerability,
 } from "./auditor";
 const SCRIPT_ONLY_PACKAGES = new Set([
   "nodemon",
@@ -29,16 +30,9 @@ import { GraphData } from "./graphBuilder";
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
 export function activate(context: vscode.ExtensionContext) {
-  // Use the console to output diagnostic information (console.log) and errors (console.error)
-  // This line of code will only be executed once when your extension is activated
-
-  // The command has been defined in the package.json file
-  // Now provide the implementation of the command with registerCommand
-  // The commandId parameter must match the command field in package.json
   const disposable = vscode.commands.registerCommand(
     "depradar.analyze",
     async () => {
-      // The code you place here will be executed every time your command is executed
       const workSpaceFolder = vscode.workspace.workspaceFolders;
       if (!workSpaceFolder) {
         vscode.window.showErrorMessage("No workspace opened!");
@@ -79,15 +73,15 @@ export function activate(context: vscode.ExtensionContext) {
         },
       );
 
+      // Show loading state immediately while npm commands execute
+      panel.webview.html = getLoadingHTML();
+
       const [outdated, auditSummary] = await Promise.all([
         getOutdatedPackages(rootPath),
         getVulnerabilities(rootPath),
       ]);
 
       const graphData = await buildGraph(rootPath, installedPackages);
-      console.log("nodes count:", graphData.nodes.length);
-      console.log("links count:", graphData.links.length);
-      console.log("sample nodes:", graphData.nodes.slice(0, 5));
       panel.webview.html = getWebViewContent(
         deps,
         devDeps,
@@ -100,9 +94,6 @@ export function activate(context: vscode.ExtensionContext) {
       panel.webview.onDidReceiveMessage(
         async (message) => {
           if (message.command === "refresh") {
-            console.log("Refresh triggered");
-
-            // Run npm install to sync node_modules with package.json changes
             await installDependencies(rootPath);
 
             const rawPkg = fs.readFileSync(pkgPath, "utf-8");
@@ -120,18 +111,10 @@ export function activate(context: vscode.ExtensionContext) {
                 !freshUsedPackages.has(pkg) && !SCRIPT_ONLY_PACKAGES.has(pkg),
             );
 
-            console.log("Fetching fresh outdated and audit data...");
             const [outdated, auditSummary] = await Promise.all([
               getOutdatedPackages(rootPath),
               getVulnerabilities(rootPath),
             ]);
-
-            console.log(
-              "Refresh data - Outdated:",
-              outdated.length,
-              "Unused:",
-              freshUnusedPackages.length,
-            );
 
             // Update the entire HTML with fresh data
             panel.webview.html = getWebViewContent(
@@ -158,6 +141,57 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(disposable);
 }
 
+function getLoadingHTML(): string {
+  return `<!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Dep Radar</title>
+        <style>
+            body {
+                font-family: var(--vscode-font-family);
+                color: var(--vscode-foreground);
+                background: var(--vscode-editor-background);
+                padding: 20px;
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                height: 100vh;
+                margin: 0;
+            }
+            .loading-container {
+                text-align: center;
+            }
+            .loading {
+                font-size: 18px;
+                color: var(--vscode-descriptionForeground);
+                margin-bottom: 20px;
+            }
+            .spinner {
+                width: 40px;
+                height: 40px;
+                border: 4px solid var(--vscode-panel-border);
+                border-top: 4px solid var(--vscode-button-background);
+                border-radius: 50%;
+                animation: spin 1s linear infinite;
+                margin: 0 auto;
+            }
+            @keyframes spin {
+                0% { transform: rotate(0deg); }
+                100% { transform: rotate(360deg); }
+            }
+        </style>
+    </head>
+    <body>
+        <div class="loading-container">
+            <div class="spinner"></div>
+            <div class="loading">🔍 Analyzing dependencies...</div>
+        </div>
+    </body>
+    </html>`;
+}
+
 function getWebViewContent(
   deps: number,
   devDeps: number,
@@ -166,6 +200,33 @@ function getWebViewContent(
   auditSummary: AuditSummary,
   graphData: GraphData,
 ): string {
+  const renderVulnRows = (vulns: Vulnerability[]) =>
+    vulns
+      .map(
+        (v) => `
+            <div class="stat">
+                <div>
+                    <span>${v.name}</span>
+                    ${
+                      v.isDirect
+                        ? `<span class="tag-indirect">${v.fixAvailable ? "fix available" : "no fix yet"}</span>`
+                        : `<span class="tag-indirect">via ${v.effects.join(", ") || "transitive"}</span>`
+                    }
+                </div>
+                <span class="badge badge-${v.severity}">${v.severity}</span>
+            </div>
+        `,
+      )
+      .join("") ||
+    '<p style="color: var(--vscode-descriptionForeground); font-size:12px;">None</p>';
+
+  const directVulns = auditSummary.vulnerabilities.filter((v) => v.isDirect);
+  const indirectFixable = auditSummary.vulnerabilities.filter(
+    (v) => !v.isDirect && v.effects.length > 0,
+  );
+  const deepTransitive = auditSummary.vulnerabilities.filter(
+    (v) => !v.isDirect && v.effects.length === 0,
+  );
   const outdatedHTML = `
 <h2>🔄 Outdated Packages (${outdated.length})</h2>
 <div class="card">
@@ -213,31 +274,34 @@ function getWebViewContent(
     </div>
 </div>
 
-<!-- Package-level detail — only direct deps -->
+<!-- Section 1: Direct — you fix these -->
 <div class="card">
+    <div class="section-header">
+        🔴 Fix directly — these are in your package.json
+    </div>
+    ${renderVulnRows(directVulns)}
+</div>
+
+<!-- Section 2: Indirect but fixable -->
+<div class="card">
+    <div class="section-header">
+        🟡 Fix by updating a direct dep
+    </div>
     <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 8px;">
-        Showing direct dependencies only. Indirect deps are harder to fix and usually resolved by updating their parent.
+        These are pulled in by your packages. Update the parent to fix them.
     </p>
-    ${
-      auditSummary.vulnerabilities
-        .filter((v) => v.isDirect)
-        .map(
-          (v) => `
-            <div class="stat">
-                <div>
-                    <span>${v.name}</span>
-                    ${
-                      v.fixAvailable
-                        ? '<span class="tag-indirect">fix available</span>'
-                        : '<span class="tag-indirect">no fix yet</span>'
-                    }
-                </div>
-                <span class="badge badge-${v.severity}">${v.severity}</span>
-            </div>
-        `,
-        )
-        .join("") || "<p>✅ No direct dependency vulnerabilities!</p>"
-    }
+    ${renderVulnRows(indirectFixable)}
+</div>
+
+<!-- Section 3: Deep transitive — nothing to do -->
+<div class="card">
+    <div class="section-header">
+        ⚪ Deep transitive — no action needed
+    </div>
+    <p style="color: var(--vscode-descriptionForeground); font-size: 12px; margin-bottom: 8px;">
+        These are deep indirect deps. They'll resolve on their own when upstream packages update.
+    </p>
+    ${renderVulnRows(deepTransitive)}
 </div>`;
   const total = devDeps + deps;
   return `<!DOCTYPE html>
@@ -376,6 +440,13 @@ function getWebViewContent(
     background: var(--vscode-button-background);
     color: var(--vscode-button-foreground);
     border-color: transparent;
+}
+    .section-header {
+    font-weight: bold;
+    font-size: 13px;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--vscode-panel-border);
 }
         </style>
     </head>
