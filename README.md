@@ -1,71 +1,70 @@
-# depradar README
+# DepRadar
 
-This is the README for your extension "depradar". After writing up a brief description, we recommend including the following sections.
+DepRadar is a Visual Studio Code extension that analyzes npm dependencies in a workspace. It helps you find unused packages, detect outdated dependencies, and surface security vulnerabilities so you can keep your project lean, up-to-date, and secure.
 
 ## Features
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+- 📦 Analyze production and development dependencies from `package.json`
+- 🧹 Detect unused packages that are not referenced in source files
+- 🔄 Find outdated packages with update type grouping (major/minor/patch)
+- ⚠️ Show vulnerability counts for low, moderate, high, and critical issues
+- 🌐 Render an interactive dependency graph for direct and transitive packages
+- 🔁 Refresh data on demand with a one-click analyzer refresh command
 
-For example if there is an image subfolder under your extension project workspace:
+## Usage
 
-\!\[feature X\]\(images/feature-x.png\)
+1. Open a workspace containing a `package.json` file.
+2. Run the command: **DepRadar: Analyze Dependencies**.
+3. Wait while DepRadar analyzes dependencies, outdated packages, vulnerabilities, and dependency graph data.
+4. Use the dashboard to review unused packages, outdated packages, and vulnerability totals.
+5. Switch to the Graph tab to explore direct and transitive package relationships.
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## Command
+
+- `depradar.analyze` — DepRadar: Analyze Dependencies
+
+## Installation
+
+Install the extension from the VS Code marketplace or build locally from this repository.
+
+### Local development
+
+```bash
+npm install
+npm run compile
+```
+
+Then launch the extension in VS Code using the extension development host.
 
 ## Requirements
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+- Node.js installed on your development machine
+- A workspace with a `package.json` file
+- Supported VS Code version: `^1.110.0`
 
-## Extension Settings
+## Development
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+Use the existing scripts in `package.json`:
 
-For example:
+- `npm run compile` — type check, lint, and build the extension
+- `npm run watch` — run incremental watch for TypeScript and esbuild
+- `npm run lint` — run ESLint on `src`
+- `npm test` — run extension tests
 
-This extension contributes the following settings:
+## Notes
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+- DepRadar uses a shell wrapper to locate npm in the extension host environment.
+- It ignores `@types/*` packages when reporting unused dependencies.
+- For refresh operations, it installs dependencies with `--ignore-scripts --no-audit --legacy-peer-deps` to reduce install failures.
 
-## Known Issues
+## Changelog
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+See `CHANGELOG.md` for release history.
 
-## Release Notes
+## Contributing
 
-Users appreciate release notes as you update your extension.
+Contributions are welcome. Please open issues or pull requests on the repository.
 
-### 1.0.0
+## License
 
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+This project uses the licensing terms defined by the repository owner.
