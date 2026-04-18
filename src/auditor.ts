@@ -40,14 +40,17 @@ function runCommand(command: string, cwd: string): Promise<string> {
         );
       }
       // Still resolve with stdout, as some commands like "npm outdated" return exit code 1 when packages are outdated
-      resolve(stdout);
+      resolve(stdout || "");
     });
   });
 }
 
 export async function installDependencies(rootPath: string): Promise<void> {
   try {
-    await runCommand("npm install --legacy-peer-deps 2>&1 || true", rootPath);
+    await runCommand(
+      "npm install --ignore-scripts --no-audit --legacy-peer-deps 2>&1 || true",
+      rootPath,
+    );
   } catch (error) {
     // Continue anyway - outdated/audit might still work with partial installs
   }
@@ -66,15 +69,25 @@ export async function getOutdatedPackages(
     const result: OutdatedPackage[] = [];
 
     for (const [name, info] of Object.entries(raw) as any) {
-      const current = info.current;
-      const latest = info.latest;
+      const current = typeof info.current === "string" ? info.current : "";
+      const latest = typeof info.latest === "string" ? info.latest : "";
+      const parsedCurrent = semver.coerce(current)?.version ?? current;
+      const parsedLatest = semver.coerce(latest)?.version ?? latest;
 
-      const diff = semver.diff(current, latest);
+      const diff =
+        semver.valid(parsedCurrent) && semver.valid(parsedLatest)
+          ? semver.diff(parsedCurrent, parsedLatest)
+          : null;
       const updateType = (
         diff === "major" ? "major" : diff === "minor" ? "minor" : "patch"
       ) as "major" | "minor" | "patch";
 
-      result.push({ name, current, latest, updateType });
+      result.push({
+        name,
+        current: current || "unknown",
+        latest: latest || "unknown",
+        updateType,
+      });
     }
 
     return result;
@@ -103,10 +116,15 @@ export async function getVulnerabilities(
     ) as any) {
       vulns.push({
         name,
-        severity: info.severity,
-        isDirect: info.isDirect,
+        severity:
+          info.severity === "critical" ||
+          info.severity === "high" ||
+          info.severity === "moderate"
+            ? info.severity
+            : "low",
+        isDirect: !!info.isDirect,
         fixAvailable: !!info.fixAvailable,
-        effects: info.effects,
+        effects: Array.isArray(info.effects) ? info.effects : [],
       });
     }
     return {

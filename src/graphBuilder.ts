@@ -81,12 +81,18 @@ export async function buildGraph(
   const links: GraphLink[] = [];
   const visited = new Set<string>();
 
-  const rootName: string = raw.name ?? "my-project";
+  const rootName: string =
+    typeof raw.name === "string" ? raw.name : "my-project";
   nodes.push({ id: rootName, isDirect: false });
   visited.add(rootName);
 
-  if (raw.dependencies) {
-    traverse(rootName, raw.dependencies, links, nodes, visited, directPackages);
+  const dependencies =
+    typeof raw.dependencies === "object" && raw.dependencies !== null
+      ? raw.dependencies
+      : {};
+
+  if (Object.keys(dependencies).length > 0) {
+    traverse(rootName, dependencies, links, nodes, visited, directPackages);
   }
   return { nodes, links };
 }

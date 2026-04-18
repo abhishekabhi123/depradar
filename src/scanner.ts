@@ -4,15 +4,21 @@ import * as fs from "node:fs";
 
 export function getUsedPackages(rootPath: string): Set<string> {
   const usedPackages = new Set<string>();
-  const tsconfigPath = path.join(rootPath, "tsconfig.js");
+  const tsconfigJsonPath = path.join(rootPath, "tsconfig.json");
+  const tsconfigJsPath = path.join(rootPath, "tsconfig.js");
 
   const project = new Project(
-    fs.existsSync(tsconfigPath)
+    fs.existsSync(tsconfigJsonPath)
       ? {
-          tsConfigFilePath: path.join(rootPath, "tsconfig.json"),
+          tsConfigFilePath: tsconfigJsonPath,
           skipAddingFilesFromTsConfig: false,
         }
-      : {},
+      : fs.existsSync(tsconfigJsPath)
+        ? {
+            tsConfigFilePath: tsconfigJsPath,
+            skipAddingFilesFromTsConfig: false,
+          }
+        : {},
   );
 
   if (project.getSourceFiles().length === 0) {
@@ -34,7 +40,7 @@ export function getUsedPackages(rootPath: string): Set<string> {
       SyntaxKind.CallExpression,
     )) {
       const exp = call.getExpression().getText();
-      if (exp === "require") {
+      if (exp === "require" || exp === "import") {
         const args = call.getArguments();
         if (args.length > 0) {
           const packageName = extractPackageName(
@@ -52,7 +58,14 @@ export function getUsedPackages(rootPath: string): Set<string> {
 }
 
 function extractPackageName(modulePath: string): string | null {
-  if (modulePath.startsWith(".") || modulePath.startsWith("/")) {
+  if (
+    modulePath.startsWith(".") ||
+    modulePath.startsWith("/") ||
+    modulePath.startsWith("file:") ||
+    modulePath.startsWith("link:") ||
+    modulePath.startsWith("workspace:") ||
+    modulePath.startsWith("git+")
+  ) {
     return null;
   }
   if (modulePath.startsWith("@")) {

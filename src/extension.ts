@@ -24,6 +24,18 @@ const SCRIPT_ONLY_PACKAGES = new Set([
   "vitest",
   "tsx",
   "tsc-alias",
+  "typescript",
+  "mocha",
+  "chai",
+  "supertest",
+  "jest-mock",
+  "prisma",
+  "@prisma/client",
+  "husky",
+  "lint-staged",
+  "dotenv-cli",
+  "tsc-alias",
+  "tsconfig-paths",
 ]);
 import { buildGraph } from "./graphBuilder";
 import { GraphData } from "./graphBuilder";
@@ -61,7 +73,10 @@ export function activate(context: vscode.ExtensionContext) {
       const usedPackages = getUsedPackages(rootPath);
 
       const unusedPackages = [...installedPackages].filter(
-        (pkg) => !usedPackages.has(pkg) && !SCRIPT_ONLY_PACKAGES.has(pkg),
+        (pkg) =>
+          !usedPackages.has(pkg) &&
+          !SCRIPT_ONLY_PACKAGES.has(pkg) &&
+          !pkg.startsWith("@types/"),
       );
 
       const panel = vscode.window.createWebviewPanel(
@@ -75,6 +90,7 @@ export function activate(context: vscode.ExtensionContext) {
 
       // Show loading state immediately while npm commands execute
       panel.webview.html = getLoadingHTML();
+      await installDependencies(rootPath);
 
       const [outdated, auditSummary] = await Promise.all([
         getOutdatedPackages(rootPath),
@@ -108,7 +124,9 @@ export function activate(context: vscode.ExtensionContext) {
             const freshUsedPackages = getUsedPackages(rootPath);
             const freshUnusedPackages = [...freshInstalledPackages].filter(
               (pkg) =>
-                !freshUsedPackages.has(pkg) && !SCRIPT_ONLY_PACKAGES.has(pkg),
+                !freshUsedPackages.has(pkg) &&
+                !SCRIPT_ONLY_PACKAGES.has(pkg) &&
+                !pkg.startsWith("@types/"),
             );
 
             const [outdated, auditSummary] = await Promise.all([
@@ -356,14 +374,14 @@ function getWebViewContent(
           text-transform: uppercase;
 }
     .badge-critical { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); }
-    .badge-high     { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); opacity: 0.85; }
-    .badge-moderate { background: var(--vscode-warningForeground); color: var(--vscode-editor-background); }
-    .badge-low      { background: var(--vscode-descriptionForeground); color: var(--vscode-editor-background); }
+    .badge-high     { background: var(--vscode-inputValidation-errorBackground); color: var(--vscode-inputValidation-errorForeground); }
+    .badge-moderate { background: var(--vscode-inputValidation-warningBackground); color: var(--vscode-inputValidation-warningForeground); }
+    .badge-low      { background: var(--vscode-inputValidation-infoBackground); color: var(--vscode-inputValidation-infoForeground); }
     .badge-major    { background: var(--vscode-errorForeground); color: var(--vscode-editor-background); }
-    .badge-minor    { background: var(--vscode-warningForeground); color: var(--vscode-editor-background); }
-    .badge-patch    { color: var(--vscode-foreground); border: 1px solid var(--vscode-panel-border); }
+    .badge-minor    { background: var(--vscode-inputValidation-warningBackground); color: var(--vscode-inputValidation-warningForeground); }
+    .badge-patch    { background: var(--vscode-editorHoverWidget-background); color: var(--vscode-foreground); border: 1px solid var(--vscode-panel-border); }
     .tag-indirect   { font-size: 11px; color: var(--vscode-descriptionForeground); margin-left: 6px; }
-    .badge-prerelease { background: var(--vscode-warningForeground); color: var(--vscode-editor-background); }
+    .badge-prerelease { background: var(--vscode-inputValidation-warningBackground); color: var(--vscode-inputValidation-warningForeground); }
     .loading {
         text-align: center;
         padding: 20px;

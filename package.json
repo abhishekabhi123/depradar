@@ -6,16 +6,22 @@
   "engines": {
     "vscode": "^1.110.0"
   },
+  "icon": "depradar-icon.svg",
   "categories": [
     "Other"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/abhishekabhi123/depradar"
+  },
+  "publisher": "AbhishekPS",
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "depradar.analyze",
-        "title": " Analyze Dependencies"
+        "title": "DepRadar: Analyze Dependencies"
       }
     ]
   },
