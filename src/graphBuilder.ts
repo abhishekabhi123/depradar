@@ -17,15 +17,9 @@ export interface GraphData {
 
 function runCommand(command: string, cwd: string): Promise<string> {
   return new Promise((resolve) => {
-    // Use bash -i to load the user's shell environment so npm is found in PATH
-    const bashCommand = `bash -i -c "${command.replace(/"/g, '\\"')}"`;
-
-    exec(bashCommand, { cwd, shell: "/bin/bash" }, (error, stdout, stderr) => {
+    exec(command, { cwd }, (error, stdout, stderr) => {
       if (error) {
-        console.warn(
-          `[graphBuilder] Command '${command}' exited with code ${error.code}:`,
-          stderr,
-        );
+        console.warn(`[graphBuilder] Command '${command}' failed:`, stderr);
       }
       resolve(stdout ?? "");
     });
@@ -41,6 +35,10 @@ function traverse(
   directPackages: Set<string>,
 ) {
   for (const [pkgName, pkgData] of Object.entries(dependencies)) {
+    if (pkgData?.extraneous || pkgData?.missing) {
+      continue;
+    }
+
     links.push({ source: parentName, target: pkgName });
 
     if (visited.has(pkgName)) {

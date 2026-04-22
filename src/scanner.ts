@@ -6,26 +6,42 @@ export function getUsedPackages(rootPath: string): Set<string> {
   const usedPackages = new Set<string>();
   const tsconfigJsonPath = path.join(rootPath, "tsconfig.json");
   const tsconfigJsPath = path.join(rootPath, "tsconfig.js");
-
+  const ignorePaths = [
+    "node_modules",
+    "dist",
+    "build",
+    "out",
+    ".next",
+    "coverage",
+  ];
   const project = new Project(
     fs.existsSync(tsconfigJsonPath)
       ? {
           tsConfigFilePath: tsconfigJsonPath,
           skipAddingFilesFromTsConfig: false,
+          compilerOptions: { allowJs: true },
         }
       : fs.existsSync(tsconfigJsPath)
         ? {
             tsConfigFilePath: tsconfigJsPath,
             skipAddingFilesFromTsConfig: false,
+            compilerOptions: { allowJs: true },
           }
-        : {},
+        : {
+            skipAddingFilesFromTsConfig: true,
+            compilerOptions: { allowJs: true },
+          },
   );
 
   if (project.getSourceFiles().length === 0) {
-    project.addSourceFilesAtPaths([
-      path.join(rootPath, "src/**/*.{ts,tsx,js,jsx}"),
-      path.join(rootPath, "*.{ts,tsx,js,jsx}"),
-    ]);
+    project
+      .addSourceFilesAtPaths([
+        path.join(rootPath, "**/*.{ts,tsx,js,jsx,mjs,cjs}"),
+      ])
+      .filter(
+        (file) =>
+          !ignorePaths.some((p) => file.getFilePath().includes(`/${p}/`)),
+      );
   }
 
   for (const sourceFile of project.getSourceFiles()) {
@@ -43,9 +59,8 @@ export function getUsedPackages(rootPath: string): Set<string> {
       if (exp === "require" || exp === "import") {
         const args = call.getArguments();
         if (args.length > 0) {
-          const packageName = extractPackageName(
-            args[0].getText().replace(/[""]/g, ""),
-          );
+          const raw = args[0].getText().replace(/^['"`]|['"`]$/g, "");
+          const packageName = extractPackageName(raw);
           if (packageName) {
             usedPackages.add(packageName);
           }

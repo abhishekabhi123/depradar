@@ -29,17 +29,14 @@ export interface AuditSummary {
 
 function runCommand(command: string, cwd: string): Promise<string> {
   return new Promise((resolve) => {
-    // Use bash -i to load the user's shell environment so npm is found in PATH
-    const bashCommand = `bash -i -c "${command.replace(/"/g, '\\"')}"`;
-
-    exec(bashCommand, { cwd, shell: "/bin/bash" }, (error, stdout, stderr) => {
+    exec(command, { cwd }, (error, stdout, stderr) => {
       if (error) {
         console.warn(
           `Command '${command}' exited with code ${error.code}:`,
           stderr,
         );
       }
-      // Still resolve with stdout, as some commands like "npm outdated" return exit code 1 when packages are outdated
+      // Still resolve with stdout — npm outdated exits code 1 when outdated packages exist
       resolve(stdout || "");
     });
   });

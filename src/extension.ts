@@ -80,11 +80,12 @@ export function activate(context: vscode.ExtensionContext) {
       );
 
       const panel = vscode.window.createWebviewPanel(
-        "depRadar",
-        "Dep Radar",
-        vscode.ViewColumn.Beside,
+        "depradar",
+        "DepRadar",
+        vscode.ViewColumn.One,
         {
           enableScripts: true,
+          localResourceRoots: [],
         },
       );
 
@@ -128,6 +129,10 @@ export function activate(context: vscode.ExtensionContext) {
                 !SCRIPT_ONLY_PACKAGES.has(pkg) &&
                 !pkg.startsWith("@types/"),
             );
+            const freshGraphData = await buildGraph(
+              rootPath,
+              freshInstalledPackages,
+            );
 
             const [outdated, auditSummary] = await Promise.all([
               getOutdatedPackages(rootPath),
@@ -141,7 +146,7 @@ export function activate(context: vscode.ExtensionContext) {
               freshUnusedPackages,
               outdated,
               auditSummary,
-              graphData,
+              freshGraphData,
             );
 
             // Send completion signal to hide loading state
@@ -327,6 +332,10 @@ function getWebViewContent(
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <meta http-equiv="Content-Security-Policy" 
+           content="default-src 'none'; 
+           script-src 'unsafe-inline' https://cdn.jsdelivr.net; 
+           style-src 'unsafe-inline';">
         <title>Dep Radar</title>
         <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
         <style>
@@ -563,6 +572,11 @@ function getWebViewContent(
 const graphData = ${JSON.stringify(graphData)};
 
 function renderGraph() {
+   if (!graphData || !graphData.nodes || graphData.nodes.length === 0) {
+        document.getElementById('graph-container').innerHTML = 
+            '<p style="padding:20px;color:var(--vscode-descriptionForeground)">No dependency data available. Try refreshing.</p>';
+        return;
+    }
     const container = document.getElementById('graph-container');
     const width = container.clientWidth;
     const height = container.clientHeight;
@@ -672,12 +686,13 @@ function renderGraph() {
 
 // Render when graph tab is opened
 document.getElementById('tab-graph').addEventListener('click', () => {
-    // Only render once
-    setTimeout(() => {
-        if (!document.querySelector('#graph-container svg')) {
-            renderGraph();
-        }
-    }, 0);
+    requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+            if (!document.querySelector('#graph-container svg')) {
+                renderGraph();
+            }
+        });
+    });
 });
         </script>
     </body>
