@@ -43,12 +43,6 @@ function runCommand(command: string, cwd: string): Promise<string> {
         encoding: "utf8",
       },
       (error: ExecException | null, stdout: string, stderr: string) => {
-        if (stderr && stderr.trim()) {
-          console.warn(`Command '${command}' stderr:`, stderr.trim());
-        }
-        if (error) {
-          console.warn(`Command '${command}' exited with code ${error.code}`);
-        }
         resolve(stdout || stderr || "");
       },
     );

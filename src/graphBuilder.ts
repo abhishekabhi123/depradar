@@ -31,12 +31,6 @@ function runCommand(command: string, cwd: string): Promise<string> {
         encoding: "utf8",
       },
       (error: ExecException | null, stdout: string, stderr: string) => {
-        if (stderr && stderr.trim()) {
-          console.warn(`Command '${command}' stderr:`, stderr.trim());
-        }
-        if (error) {
-          console.warn(`Command '${command}' exited with code ${error.code}`);
-        }
         resolve(stdout || stderr || "");
       },
     );
@@ -82,8 +76,6 @@ export async function buildGraph(
   directPackages: Set<string>,
 ): Promise<GraphData> {
   const stdOut = await runCommand("npm list --json --depth=2", rootPath);
-  console.log("[graphBuilder] stdout length:", stdOut.length);
-  console.log("[graphBuilder] first 500 chars:", stdOut.substring(0, 500));
   if (!stdOut.trim()) {
     return { nodes: [], links: [] };
   }
