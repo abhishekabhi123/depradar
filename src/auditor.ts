@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { exec, ExecException } from "child_process";
 import * as semver from "semver";
 
 export interface OutdatedPackage {
@@ -28,17 +28,30 @@ export interface AuditSummary {
 }
 
 function runCommand(command: string, cwd: string): Promise<string> {
+  const shellPath = process.env.SHELL || "/bin/bash";
+  const shellCommand =
+    process.platform === "win32"
+      ? command
+      : `${shellPath} -il -c ${JSON.stringify(command)}`;
+
   return new Promise((resolve) => {
-    exec(command, { cwd }, (error, stdout, stderr) => {
-      if (error) {
-        console.warn(
-          `Command '${command}' exited with code ${error.code}:`,
-          stderr,
-        );
-      }
-      // Still resolve with stdout — npm outdated exits code 1 when outdated packages exist
-      resolve(stdout || "");
-    });
+    exec(
+      shellCommand,
+      {
+        cwd,
+        env: { ...process.env }, // ← inherit full VS Code process environment
+        encoding: "utf8",
+      },
+      (error: ExecException | null, stdout: string, stderr: string) => {
+        if (stderr && stderr.trim()) {
+          console.warn(`Command '${command}' stderr:`, stderr.trim());
+        }
+        if (error) {
+          console.warn(`Command '${command}' exited with code ${error.code}`);
+        }
+        resolve(stdout || stderr || "");
+      },
+    );
   });
 }
 

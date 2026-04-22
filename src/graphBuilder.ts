@@ -1,4 +1,4 @@
-import { exec } from "child_process";
+import { exec, ExecException } from "child_process";
 
 export interface GraphNode {
   id: string;
@@ -16,13 +16,30 @@ export interface GraphData {
 }
 
 function runCommand(command: string, cwd: string): Promise<string> {
+  const shellPath = process.env.SHELL || "/bin/bash";
+  const shellCommand =
+    process.platform === "win32"
+      ? command
+      : `${shellPath} -il -c ${JSON.stringify(command)}`;
+
   return new Promise((resolve) => {
-    exec(command, { cwd }, (error, stdout, stderr) => {
-      if (error) {
-        console.warn(`[graphBuilder] Command '${command}' failed:`, stderr);
-      }
-      resolve(stdout ?? "");
-    });
+    exec(
+      shellCommand,
+      {
+        cwd,
+        env: { ...process.env }, // ← inherit full VS Code process environment
+        encoding: "utf8",
+      },
+      (error: ExecException | null, stdout: string, stderr: string) => {
+        if (stderr && stderr.trim()) {
+          console.warn(`Command '${command}' stderr:`, stderr.trim());
+        }
+        if (error) {
+          console.warn(`Command '${command}' exited with code ${error.code}`);
+        }
+        resolve(stdout || stderr || "");
+      },
+    );
   });
 }
 
@@ -65,6 +82,8 @@ export async function buildGraph(
   directPackages: Set<string>,
 ): Promise<GraphData> {
   const stdOut = await runCommand("npm list --json --depth=2", rootPath);
+  console.log("[graphBuilder] stdout length:", stdOut.length);
+  console.log("[graphBuilder] first 500 chars:", stdOut.substring(0, 500));
   if (!stdOut.trim()) {
     return { nodes: [], links: [] };
   }
@@ -72,6 +91,12 @@ export async function buildGraph(
   try {
     raw = JSON.parse(stdOut);
   } catch (error) {
+    console.error(
+      "[graphBuilder] Failed to parse npm list output:",
+      error,
+      "stdout:",
+      stdOut.substring(0, 1000),
+    );
     return { nodes: [], links: [] };
   }
 
