@@ -2,7 +2,7 @@
   "name": "depradar",
   "displayName": "DepRadar",
   "description": "A smart dependency analyzer for VS Code that helps you find unused packages, detect outdated dependencies, and keep your project clean, fast, and secure.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "engines": {
     "vscode": "^1.110.0"
   },
